@@ -218,13 +218,13 @@ func (cc *ClientConn) WriteOK(status uint16) error {
 
 func (cc *ClientConn) WriteOKResult(status uint16, r *mysql.Result) error {
 	if r.Resultset == nil {
-		return cc.WriteOKPacket(r.AffectedRows, r.InsertID, status, 0)
+		return cc.WriteOKPacket(r.AffectedRows, r.InsertID, status, 1)
 	}
 	return cc.WriteResultset(status, r.Resultset)
 }
 
-func (cc *ClientConn) WriteEOFPacket(status uint16) error {
-	err := cc.WriteEOFPacket(status)
+func (cc *ClientConn) WriteEOFPacketNoneWarning(status uint16) error {
+	err := cc.WriteEOFPacket(status, 0)
 	if err != nil {
 		log.Warn("write eof packet failed, %v", err)
 		return err
@@ -283,7 +283,7 @@ func (cc *ClientConn) WriteResultset(status uint16, r *mysql.Resultset) error {
 		}
 	}
 
-	err = cc.WriteEOFPacket(status)
+	err = cc.WriteEOFPacketNoneWarning(status)
 	if err != nil {
 		return err
 	}
@@ -305,7 +305,7 @@ func (cc *ClientConn) WriteFieldList(status uint16, fs []*mysql.Field) error {
 		}
 	}
 
-	err = cc.WriteEOFPacket(status)
+	err = cc.WriteEOFPacketNoneWarning(status)
 	return err
 }
 
