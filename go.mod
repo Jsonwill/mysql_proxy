@@ -1,4 +1,4 @@
-module github.com/Jsonwill/mysqlproxy
+module github.com/Jsonwill/mysql_proxy
 
 go 1.13
 
