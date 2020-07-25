@@ -11,7 +11,7 @@ import (
 
 func main() {
 	fmt.Println("Hi")
-	listener, err := net.Listen("tcp4", "0.0.0.0:8002")
+	listener, err := net.Listen("tcp4", ":8002")
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -48,12 +48,13 @@ func GetTables(sql string, stmt *ast.ShowStmt) (*mysql.Result, error) {
 }
 
 func SelectHandler(sql string, stmt *ast.ShowStmt) (*mysql.Result, error) {
-	dbs := []string{"select-q", "select-w"}
+	vals := []float64{2.9, 2.1, 3.2}
 	values := make([][]interface{}, 0)
-	for _, db := range dbs {
-		values = append(values, []interface{}{db, time.Now().Unix()})
+	now := time.Now().Unix()
+	for k, v := range vals {
+		values = append(values, []interface{}{now - int64(5*60*k), "metric", v})
 	}
-	return proxy.BuildResult([]string{"db", "time"}, values)
+	return proxy.BuildResult([]string{"time", "metric", "val"}, values)
 }
 
 func GetAllowedDBs() []string {

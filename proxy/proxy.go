@@ -9,39 +9,37 @@ import (
 	"github.com/XiaoMi/Gaea/parser"
 	"github.com/XiaoMi/Gaea/parser/ast"
 	"github.com/XiaoMi/Gaea/proxy/plan"
-	"github.com/XiaoMi/Gaea/util"
 	"github.com/pingcap/errors"
 	"net"
 	"strings"
-	"time"
 )
 
 type SqlHanler func(sql string, stmt *ast.ShowStmt) (*mysql.Result, error)
 
 type Proxy struct {
-	showTableHandler    *SqlHanler
-	showDatabaseHandler *SqlHanler
-	selectHandler       *SqlHanler
+	showTableHandler    SqlHanler
+	showDatabaseHandler SqlHanler
+	selectHandler       SqlHanler
 }
 
 func NewProxy(showDatabaseHandler SqlHanler, showTableHandler SqlHanler, selectHandler SqlHanler) *Proxy {
 	return &Proxy{
-		showTableHandler:    &showTableHandler,
-		showDatabaseHandler: &showDatabaseHandler,
-		selectHandler:       &selectHandler,
+		showTableHandler:    showTableHandler,
+		showDatabaseHandler: showDatabaseHandler,
+		selectHandler:       selectHandler,
 	}
 }
 
 func (p *Proxy) SetShowTableHandler(h SqlHanler) {
-	p.showTableHandler = &h
+	p.showTableHandler = h
 }
 
 func (p *Proxy) SetShowDatabaseHandler(h SqlHanler) {
-	p.showDatabaseHandler = &h
+	p.showDatabaseHandler = h
 }
 
 func (p *Proxy) SetSelectHandler(h SqlHanler) {
-	p.selectHandler = &h
+	p.selectHandler = h
 }
 
 func (p *Proxy) DealConn(c net.Conn) error {
@@ -69,7 +67,7 @@ func (p *Proxy) DealConn(c net.Conn) error {
 		data = data[1:]
 		fmt.Println("data=", string(data))
 
-		rs := ExecuteCommand(cmd, data)
+		rs := p.ExecuteCommand(cmd, data)
 		cc.RecycleReadPacket()
 		//rs := executor.CreateOKResponse(0)
 		if err = writeResponse(rs, cc); err != nil {
@@ -142,7 +140,7 @@ func handleHandshakeResponse(info HandshakeResponseInfo, c *ClientConn) error {
 	return nil
 }
 
-func ExecuteCommand(cmd byte, data []byte) executor.Response {
+func (p *Proxy) ExecuteCommand(cmd byte, data []byte) executor.Response {
 	switch cmd {
 	case mysql.ComQuit:
 		log.Trace("mysql.ComQuit")
@@ -155,7 +153,7 @@ func ExecuteCommand(cmd byte, data []byte) executor.Response {
 		sql := string(data)
 
 		// handle phase
-		r, e := handleQuery(sql)
+		r, e := p.handleQuery(sql)
 		if e != nil {
 			return executor.CreateErrorResponse(mysql.ServerStatusAutocommit, e)
 		}
@@ -232,10 +230,8 @@ func ExecuteCommand(cmd byte, data []byte) executor.Response {
 	}
 }
 
-func handleQuery(sql string) (r *mysql.Result, e error) {
+func (p *Proxy) handleQuery(sql string) (r *mysql.Result, e error) {
 	sql = strings.TrimRight(sql, ";") //删除sql语句最后的分号
-
-	reqCtx := util.NewRequestContext()
 
 	stmtType := parser.Preview(sql)
 	if canHandleWithoutPlan(stmtType) {
@@ -246,7 +242,7 @@ func handleQuery(sql string) (r *mysql.Result, e error) {
 		}
 		switch s := stmt.(type) {
 		case *ast.ShowStmt:
-			return handleShow(sql, s)
+			return p.handleShow(sql, s)
 		case *ast.SetStmt:
 		case *ast.BeginStmt:
 		case *ast.CommitStmt:
@@ -259,15 +255,18 @@ func handleQuery(sql string) (r *mysql.Result, e error) {
 	if stmtType != parser.StmtSelect {
 		return nil, fmt.Errorf("not support[%d]", stmtType)
 	}
-	reqCtx.Set(util.StmtType, stmtType)
-
-	dbs := []string{"select-q", "select-w"}
-	values := make([][]interface{}, 0)
-	for _, db := range dbs {
-		values = append(values, []interface{}{db, time.Now().Unix()})
+	//reqCtx.Set(util.StmtType, stmtType)
+	//
+	//dbs := []string{"select-q", "select-w"}
+	//values := make([][]interface{}, 0)
+	//for _, db := range dbs {
+	//	values = append(values, []interface{}{db, time.Now().Unix()})
+	//}
+	//r, e = BuildResult([]string{"db", "time"}, values)
+	if p.selectHandler == nil {
+		return BuildResult([]string{"db"}, nil)
 	}
-	r, e = BuildResult([]string{"db", "time"}, values)
-	return
+	return p.selectHandler(sql, nil)
 }
 func BuildResult(columns []string, vals [][]interface{}) (*mysql.Result, error) {
 	rs, _ := mysql.BuildResultset(nil, columns, vals)
@@ -290,22 +289,29 @@ func ParseOneStmt(sql string) (a ast.StmtNode, e error) {
 	ast.SetFlag(stmts[0])
 	return stmts[0], nil
 }
-func handleShow(sql string, stmt *ast.ShowStmt) (*mysql.Result, error) {
+func (p *Proxy) handleShow(sql string, stmt *ast.ShowStmt) (*mysql.Result, error) {
 	switch stmt.Tp {
 	case ast.ShowDatabases:
-		dbs := GetAllowedDBs()
-		vals := make([][]interface{}, 0)
-		for _, v := range dbs {
-			vals = append(vals, []interface{}{v})
+
+		if p.showDatabaseHandler == nil {
+			dbs := GetAllowedDBs()
+			vals := make([][]interface{}, 0)
+			for _, v := range dbs {
+				vals = append(vals, []interface{}{v})
+			}
+			return BuildResult([]string{"Database"}, vals)
 		}
-		return BuildResult([]string{"Database"}, vals)
+		return p.showDatabaseHandler(sql, stmt)
 	case ast.ShowTables:
-		dbs := GetAllowedTables()
-		vals := make([][]interface{}, 0)
-		for _, v := range dbs {
-			vals = append(vals, []interface{}{v})
+		if p.showTableHandler == nil {
+			dbs := GetAllowedTables()
+			vals := make([][]interface{}, 0)
+			for _, v := range dbs {
+				vals = append(vals, []interface{}{v})
+			}
+			return BuildResult([]string{"Tables"}, vals)
 		}
-		return BuildResult([]string{"Tables"}, vals)
+		return p.showTableHandler(sql, stmt)
 	default:
 		return nil, fmt.Errorf("execute sql error, sql: %s, err: not support", sql)
 	}
